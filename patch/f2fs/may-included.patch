@@ -1,0 +1,34 @@
+From 50eddb3fc9ed6c9f4c3f81df09c4a614d4dd7024 Mon Sep 17 00:00:00 2001
+From: Jaegeuk Kim <jaegeuk@kernel.org>
+Date: Mon, 3 Mar 2025 22:16:21 +0000
+Subject: [PATCH] FROMGIT: f2fs: set highest IO priority for checkpoint thread
+
+The checkpoint is the top priority thread which can stop all the filesystem
+operations. Let's make it RT priority.
+
+Bug: 390504516
+Reviewed-by: Daeho Jeong <daehojeong@google.com>
+Reviewed-by: Chao Yu <chao@kernel.org>
+Signed-off-by: Jaegeuk Kim <jaegeuk@kernel.org>
+Link: https://lore.kernel.org/linux-f2fs-devel/20250303221730.1284822-1-jaegeuk@kernel.org/T/#u
+
+(cherry picked from commit 8a2d9f00d502e6ef68c6d52f0863856040ddd2db
+https: //git.kernel.org/pub/scm/linux/kernel/git/jaegeuk/f2fs.git/ dev)
+Change-Id: Ife3b87ecff0ad4b8db805c1b15227f3afcd4fbd1
+---
+ fs/f2fs/checkpoint.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/f2fs/checkpoint.c b/fs/f2fs/checkpoint.c
+index f7677843407b..ad1a319112c9 100644
+--- a/fs/f2fs/checkpoint.c
++++ b/fs/f2fs/checkpoint.c
+@@ -21,7 +21,7 @@
+ #include "iostat.h"
+ #include <trace/events/f2fs.h>
+ 
+-#define DEFAULT_CHECKPOINT_IOPRIO (IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 3))
++#define DEFAULT_CHECKPOINT_IOPRIO (IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 3))
+ 
+ static struct kmem_cache *ino_entry_slab;
+ struct kmem_cache *f2fs_inode_entry_slab;

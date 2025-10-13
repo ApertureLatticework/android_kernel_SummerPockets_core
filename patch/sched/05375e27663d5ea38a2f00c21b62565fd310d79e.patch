@@ -1,0 +1,83 @@
+From 05375e27663d5ea38a2f00c21b62565fd310d79e Mon Sep 17 00:00:00 2001
+From: Cloud_Yun <1770669041@qq.com>
+Date: Wed, 3 Sep 2025 14:32:47 +0000
+Subject: [PATCH] sched/idle: Optimize idle loop and IRQ handling
+
+Key changes:
+1. Replaced local_irq_enable() with raw_local_irq_enable() in:
+   - cpu_idle_poll() exit path to avoid tracing overhead
+   - IRQ disabled warning to reduce instrumentation
+
+2. Optimized main idle loop:
+   - Marked need_resched() check with likely() for branch prediction
+   - Moved rcu_nocb_flush_deferred_wakeup() after idle state processing
+     to avoid unnecessary pre-idle wakeups
+   - Restructured poll condition checks for clarity using unlikely()
+
+3. Added tick restart before polling when:
+   - cpu_idle_force_poll is set
+   - Broadcast timer expired
+   Ensures consistent tick handling in poll path
+
+These changes reduce instrumentation overhead in idle paths, optimize RCU callback processing, and improve power efficiency by minimizing unnecessary operations before entering idle states. The raw IRQ functions avoid tracing/accounting overhead while maintaining correct IRQ state handling.
+---
+ kernel/sched/idle.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/sched/idle.c b/kernel/sched/idle.c
+index 200a0fac03b8..3a87bda02104 100644
+--- a/kernel/sched/idle.c
++++ b/kernel/sched/idle.c
+@@ -175,7 +175,7 @@ static void cpuidle_idle_call(void)
+ 	 * case, exit the function after re-enabling the local irq.
+ 	 */
+ 	if (need_resched()) {
+-		local_irq_enable();
++		raw_local_irq_enable();
+ 		return;
+ 	}
+ 
+@@ -247,7 +247,7 @@ static void cpuidle_idle_call(void)
+ 	 * It is up to the idle functions to reenable local interrupts
+ 	 */
+ 	if (WARN_ON_ONCE(irqs_disabled()))
+-		local_irq_enable();
++		raw_local_irq_enable();
+ }
+ 
+ /*
+@@ -276,7 +276,7 @@ static void do_idle(void)
+ 	__current_set_polling();
+ 	tick_nohz_idle_enter();
+ 
+-	while (!need_resched()) {
++	while (likely(!need_resched())) {
+ 		rmb();
+ 
+ 		local_irq_disable();
+@@ -288,7 +288,6 @@ static void do_idle(void)
+ 		}
+ 
+ 		arch_cpu_idle_enter();
+-		rcu_nocb_flush_deferred_wakeup();
+ 
+ 		/*
+ 		 * In poll mode we reenable interrupts and spin. Also if we
+@@ -296,12 +295,16 @@ static void do_idle(void)
+ 		 * broadcast device expired for us, we don't want to go deep
+ 		 * idle as we know that the IPI is going to arrive right away.
+ 		 */
+-		if (cpu_idle_force_poll || tick_check_broadcast_expired()) {
++		if (unlikely(cpu_idle_force_poll)) {
++			tick_nohz_idle_restart_tick();
++			cpu_idle_poll();
++		} else if (unlikely(tick_check_broadcast_expired())) {
+ 			tick_nohz_idle_restart_tick();
+ 			cpu_idle_poll();
+ 		} else {
+ 			cpuidle_idle_call();
+ 		}
++		rcu_nocb_flush_deferred_wakeup();
+ 		arch_cpu_idle_exit();
+ 	}
+ 

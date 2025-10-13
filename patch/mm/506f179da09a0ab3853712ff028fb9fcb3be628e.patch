@@ -1,0 +1,40 @@
+From 506f179da09a0ab3853712ff028fb9fcb3be628e Mon Sep 17 00:00:00 2001
+From: Danny Lin <danny@kdrag0n.dev>
+Date: Wed, 16 Jul 2025 05:10:39 +0000
+Subject: [PATCH] mm, vmstat: Add likelihood labels to quiet_vmstat conditions
+ These labels are based on observations from a running system as well as from
+ inspecting the code:
+
+!delayed_work_pending:
+  true  = 3509732
+  false = 7495535
+
+!need_update:
+  true  = 6656251
+  false = 840000
+
+Signed-off-by: Danny Lin <danny@kdrag0n.dev>
+---
+ mm/vmstat.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mm/vmstat.c b/mm/vmstat.c
+index d65faedb9441..61694570d6c4 100644
+--- a/mm/vmstat.c
++++ b/mm/vmstat.c
+@@ -1981,13 +1981,13 @@ static bool need_update(int cpu)
+  */
+ void quiet_vmstat(void)
+ {
+-	if (system_state != SYSTEM_RUNNING)
++	if (unlikely(system_state != SYSTEM_RUNNING))
+ 		return;
+ 
+ 	if (!delayed_work_pending(this_cpu_ptr(&vmstat_work)))
+ 		return;
+ 
+-	if (!need_update(smp_processor_id()))
++	if (likely(!need_update(smp_processor_id())))
+ 		return;
+ 
+ 	/*

@@ -1,0 +1,67 @@
+From e914cf01300625c2a0552845f79c440e4c472dde Mon Sep 17 00:00:00 2001
+From: Cloud_Yun <1770669041@qq.com>
+Date: Sat, 24 May 2025 17:38:05 +0900
+Subject: [PATCH] f2fs: use copy_page for full page copy
+
+---
+ fs/f2fs/checkpoint.c | 2 +-
+ fs/f2fs/compress.c   | 5 ++++-
+ fs/f2fs/node.c       | 2 +-
+ fs/f2fs/segment.c    | 2 +-
+ 4 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/fs/f2fs/checkpoint.c b/fs/f2fs/checkpoint.c
+index 08c1e6e7bdd7..23a1d444b954 100644
+--- a/fs/f2fs/checkpoint.c
++++ b/fs/f2fs/checkpoint.c
+@@ -1416,7 +1416,7 @@ static void commit_checkpoint(struct f2fs_sb_info *sbi,
+ 
+ 	f2fs_wait_on_page_writeback(page, META, true, true);
+ 
+-	memcpy(page_address(page), src, PAGE_SIZE);
++	copy_page(page_address(page), src);
+ 
+ 	set_page_dirty(page);
+ 	if (unlikely(!clear_page_dirty_for_io(page)))
+diff --git a/fs/f2fs/compress.c b/fs/f2fs/compress.c
+index 2ca8cb607c12..5fa37fa1a57b 100644
+--- a/fs/f2fs/compress.c
++++ b/fs/f2fs/compress.c
+@@ -1961,7 +1961,10 @@ void f2fs_cache_compressed_page(struct f2fs_sb_info *sbi, struct page *page,
+ 	if (!f2fs_is_valid_blkaddr(sbi, blkaddr, DATA_GENERIC_ENHANCE_READ))
+ 		goto out;
+ 
+-	memcpy(page_address(cpage), page_address(page), PAGE_SIZE);
++    copy_page(page_address(cpage), page_address(page));
++ 	if (!f2fs_is_valid_blkaddr(sbi, blkaddr, DATA_GENERIC_ENHANCE_READ))
++ 		goto out;
++
+ 	SetPageUptodate(cpage);
+ out:
+ 	f2fs_put_page(cpage, 1);
+diff --git a/fs/f2fs/node.c b/fs/f2fs/node.c
+index 49a248ce6481..1b573834dc60 100644
+--- a/fs/f2fs/node.c
++++ b/fs/f2fs/node.c
+@@ -155,7 +155,7 @@ static struct page *get_next_nat_page(struct f2fs_sb_info *sbi, nid_t nid)
+ 
+ 	src_addr = page_address(src_page);
+ 	dst_addr = page_address(dst_page);
+-	memcpy(dst_addr, src_addr, PAGE_SIZE);
++	copy_page(dst_addr, src_addr);
+ 	set_page_dirty(dst_page);
+ 	f2fs_put_page(src_page, 1);
+ 
+diff --git a/fs/f2fs/segment.c b/fs/f2fs/segment.c
+index 20903acb0d54..8140f31b2c56 100644
+--- a/fs/f2fs/segment.c
++++ b/fs/f2fs/segment.c
+@@ -2566,7 +2566,7 @@ void f2fs_update_meta_page(struct f2fs_sb_info *sbi,
+ {
+ 	struct page *page = f2fs_grab_meta_page(sbi, blk_addr);
+ 
+-	memcpy(page_address(page), src, PAGE_SIZE);
++	copy_page(page_address(page), src);
+ 	set_page_dirty(page);
+ 	f2fs_put_page(page, 1);
+ }

@@ -1,0 +1,42 @@
+From bf37a23793963c235d950abd4250318d1a17cd99 Mon Sep 17 00:00:00 2001
+From: Cloud_Yun <1770669041@qq.com>
+Date: Wed, 3 Sep 2025 14:29:40 +0000
+Subject: [PATCH] f2fs: issue discards immediately in GC regardless of realtime
+ discard
+
+Previously, when realtime discard was enabled, we skipped issuing discards
+after garbage collection (GC) under the assumption that background discard
+would handle it during idle time. However, this could lead to delays in
+freeing up space, especially when the system is under heavy I/O load and
+idle time is scarce.
+
+This patch removes the realtime discard skip condition to ensure discards
+are issued immediately after GC for freed segments. This change improves
+space reclamation timeliness and prevents potential free space shortages
+during sustained write loads.
+
+The associated comment explaining the skip behavior is also removed.
+---
+ fs/f2fs/segment.c | 9 ---------
+ 1 file changed, 9 deletions(-)
+
+diff --git a/fs/f2fs/segment.c b/fs/f2fs/segment.c
+index bd0fbc88e3be..706be38a8ffc 100644
+--- a/fs/f2fs/segment.c
++++ b/fs/f2fs/segment.c
+@@ -3214,15 +3214,6 @@ int f2fs_trim_fs(struct f2fs_sb_info *sbi, struct fstrim_range *range)
+ 	if (err)
+ 		goto out;
+ 
+-	/*
+-	 * We filed discard candidates, but actually we don't need to wait for
+-	 * all of them, since they'll be issued in idle time along with runtime
+-	 * discard option. User configuration looks like using runtime discard
+-	 * or periodic fstrim instead of it.
+-	 */
+-	if (f2fs_realtime_discard_enable(sbi))
+-		goto out;
+-
+ 	start_block = START_BLOCK(sbi, start_segno);
+ 	end_block = START_BLOCK(sbi, end_segno + 1);
+ 

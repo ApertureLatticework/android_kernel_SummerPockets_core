@@ -1,0 +1,44 @@
+From bfd473c5b5559d1014854cc7b3e5c27baeee33a4 Mon Sep 17 00:00:00 2001
+From: EmanuelCN <emanuelghub@gmail.com>
+Date: Thu, 31 Jul 2025 20:30:23 +0300
+Subject: [PATCH] sched/fair: Cast sysctl_sched_migration_cost to u64 in
+ update_newidle_cost()
+
+This fixes the following warning:
+
+../kernel/sched/fair.c:11210:4: warning: comparison of distinct pointer types ('typeof (cost) *' (aka 'unsigned long long *') and 'typeof (sysctl_sched_migration_cost + 200) *' (aka 'unsigned int *')) [-Wcompare-distinct-pointer-types]
+ 11210 |                         min(cost, sysctl_sched_migration_cost + 200);
+       |                         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+../include/linux/kernel.h:907:19: note: expanded from macro 'min'
+  907 | #define min(x, y)       __careful_cmp(x, y, <)
+      |                         ^~~~~~~~~~~~~~~~~~~~~~
+../include/linux/kernel.h:898:24: note: expanded from macro '__careful_cmp'
+  898 |         __builtin_choose_expr(__safe_cmp(x, y), \
+      |                               ^~~~~~~~~~~~~~~~
+../include/linux/kernel.h:888:4: note: expanded from macro '__safe_cmp'
+  888 |                 (__typecheck(x, y) && __no_side_effects(x, y))
+      |                  ^~~~~~~~~~~~~~~~~
+../include/linux/kernel.h:874:29: note: expanded from macro '__typecheck'
+  874 |                 (!!(sizeof((typeof(x) *)1 == (typeof(y) *)1)))
+      |                            ~~~~~~~~~~~~~~ ^  ~~~~~~~~~~~~~~
+
+Fixes: 6ff320ae39 ("sched/fair: Bump sd->max_newidle_lb_cost when newidle balance fails")
+[Tashar02: Reword commit message and include warn log in description]
+Signed-off-by: Tashfin Shakeer Rhythm <tashfinshakeerrhythm@gmail.com>
+---
+ kernel/sched/fair.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index e31f31e894c9..a56bed1d0daa 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11077,7 +11077,7 @@ static inline bool update_newidle_cost(struct sched_domain *sd, u64 cost)
+ 		 * limit, plus a litle extra to avoid off by ones.
+ 		 */
+ 		sd->max_newidle_lb_cost =
+-			min(cost, sysctl_sched_migration_cost + 200);
++			min(cost, (u64)sysctl_sched_migration_cost + 200);
+ 		sd->last_decay_max_lb_cost = jiffies;
+ 	} else if (time_after(jiffies, sd->last_decay_max_lb_cost + HZ)) {
+ 		/*

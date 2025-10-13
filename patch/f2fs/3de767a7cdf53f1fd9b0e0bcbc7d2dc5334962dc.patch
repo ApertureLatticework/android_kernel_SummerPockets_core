@@ -1,0 +1,33 @@
+From 3de767a7cdf53f1fd9b0e0bcbc7d2dc5334962dc Mon Sep 17 00:00:00 2001
+From: Andrzej Perczak <linux@andrzejperczak.com>
+Date: Fri, 22 Oct 2021 21:34:50 +0200
+Subject: [PATCH] f2fs: Enable ATGC and GC_MERGE by default
+
+- ATGC is a new feature that provides enhances efficiency and
+effectiveness of bg GC.
+
+- Theoretically, on mobile devices with limited I/O and CPU resources,
+the background GC when triggered might make the system sluggish.
+Forcibly turning on gc_merge will eliminate this unintended sluggish
+nature of the device upon background GC trigger.
+
+Suggested-by: Panchajanya1999 <panchajanya@azure-dev.live>
+Signed-off-by: Andrzej Perczak <linux@andrzejperczak.com>
+Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+---
+ fs/f2fs/super.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/f2fs/super.c b/fs/f2fs/super.c
+index ce323869e0e4..4bc98dac06f0 100644
+--- a/fs/f2fs/super.c
++++ b/fs/f2fs/super.c
+@@ -2166,6 +2166,8 @@ static void default_options(struct f2fs_sb_info *sbi)
+ 	F2FS_OPTION(sbi).bggc_mode = BGGC_MODE_ON;
+ 	F2FS_OPTION(sbi).memory_mode = MEMORY_MODE_NORMAL;
+ 
++	set_opt(sbi, ATGC);
++	set_opt(sbi, GC_MERGE);
+ 	set_opt(sbi, INLINE_XATTR);
+ 	set_opt(sbi, INLINE_DATA);
+ 	set_opt(sbi, INLINE_DENTRY);

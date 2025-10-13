@@ -1,0 +1,28 @@
+From bfb91eeb917b03ebda97303ba27f2c399e30f646 Mon Sep 17 00:00:00 2001
+From: Panchajanya1999 <rsk52959@gmail.com>
+Date: Wed, 16 Feb 2022 00:50:55 +0530
+Subject: [PATCH] f2fs/sysfs: Apply RO macro on gc_urgent_sleep_time
+
+Following commit c23401e6e15f73150f45e67287be679e4deb58f4,
+we need to protect this node from Android writing to it.
+
+Change-Id: I19ee51f06c9e373acf886d83026ade290645e243
+Signed-off-by: Panchajanya1999 <rsk52959@gmail.com>
+Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+---
+ fs/f2fs/sysfs.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/f2fs/sysfs.c b/fs/f2fs/sysfs.c
+index dab418a50cb1..6354f964d4eb 100644
+--- a/fs/f2fs/sysfs.c
++++ b/fs/f2fs/sysfs.c
+@@ -879,7 +879,7 @@ static struct f2fs_attr f2fs_attr_##_name = {			\
+ 	.offset = offsetof(struct _struct_name, _elname),       \
+ }
+ 
+-F2FS_RW_ATTR(GC_THREAD, f2fs_gc_kthread, gc_urgent_sleep_time,
++F2FS_RO_ATTR(GC_THREAD, f2fs_gc_kthread, gc_urgent_sleep_time,
+ 							urgent_sleep_time);
+ F2FS_RW_ATTR(GC_THREAD, f2fs_gc_kthread, gc_min_sleep_time, min_sleep_time);
+ F2FS_RW_ATTR(GC_THREAD, f2fs_gc_kthread, gc_max_sleep_time, max_sleep_time);

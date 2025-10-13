@@ -1,0 +1,59 @@
+From 1057571c482c0ded575f432d8a60db8297b6301d Mon Sep 17 00:00:00 2001
+From: Kinaxie <huanying1194139625@gmail.com>
+Date: Wed, 3 Sep 2025 14:28:41 +0000
+Subject: [PATCH] f2fs: clean up redundant checks and improve write type
+ handling
+
+This patch makes the following optimizations to f2fs data write path:
+1. Remove redundant f2fs_bug_on() in f2fs_submit_merged_ipu_write()
+   since the later code can handle NULL cases safely.
+2. Simplify the IPU write submission by removing unnecessary
+   bio NULL check in f2fs_write_data_pages() error path.
+3. Use cp_task instead of wb_task to accurately identify checkpoint
+   writes, ensuring proper handling of FS_CP_DATA_IO.
+
+The changes improve code robustness while maintaining the same
+functionality. The checkpoint write identification helps future
+optimizations for metadata consistency operations.
+---
+ fs/f2fs/data.c | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/fs/f2fs/data.c b/fs/f2fs/data.c
+index d2d848993c9a..fa16590efa88 100644
+--- a/fs/f2fs/data.c
++++ b/fs/f2fs/data.c
+@@ -893,8 +893,6 @@ void f2fs_submit_merged_ipu_write(struct f2fs_sb_info *sbi,
+ 	bool found = false;
+ 	struct bio *target = bio ? *bio : NULL;
+ 
+-	f2fs_bug_on(sbi, !target && !page);
+-
+ 	for (temp = HOT; temp < NR_TEMP_TYPE && !found; temp++) {
+ 		struct f2fs_bio_info *io = sbi->write_io[DATA] + temp;
+ 		struct list_head *head = &io->bio_list;
+@@ -2946,13 +2944,12 @@ int f2fs_write_single_data_page(struct page *page, int *submitted,
+ 	}
+ 	unlock_page(page);
+ 	if (!S_ISDIR(inode->i_mode) && !IS_NOQUOTA(inode) &&
+-			!F2FS_I(inode)->wb_task && allow_balance)
++			!F2FS_I(inode)->cp_task && allow_balance)
+ 		f2fs_balance_fs(sbi, need_balance_fs);
+ 
+ 	if (unlikely(f2fs_cp_error(sbi))) {
+ 		f2fs_submit_merged_write(sbi, DATA);
+-		if (bio && *bio)
+-			f2fs_submit_merged_ipu_write(sbi, bio, NULL);
++		f2fs_submit_merged_ipu_write(sbi, bio, NULL);
+ 		submitted = NULL;
+ 	}
+ 
+@@ -3245,7 +3242,7 @@ static inline bool __should_serialize_io(struct inode *inode,
+ 					struct writeback_control *wbc)
+ {
+ 	/* to avoid deadlock in path of data flush */
+-	if (F2FS_I(inode)->wb_task)
++	if (F2FS_I(inode)->cp_task)
+ 		return false;
+ 
+ 	if (!S_ISREG(inode->i_mode))

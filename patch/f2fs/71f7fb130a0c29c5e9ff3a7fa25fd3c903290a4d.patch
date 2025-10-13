@@ -1,0 +1,34 @@
+From 71f7fb130a0c29c5e9ff3a7fa25fd3c903290a4d Mon Sep 17 00:00:00 2001
+From: Kinaxie <huanying1194139625@gmail.com>
+Date: Wed, 3 Sep 2025 14:24:38 +0000
+Subject: [PATCH] f2fs: simplify f2fs_cp_error handling in checkpoint.c
+
+Replace the complex f2fs_cp_error() handling in checkpoint.c with a direct
+jump to redirty_out when a checkpoint error occurs. This removes the nested
+SBI_IS_CLOSE check and page cleanup logic, streamlining the error handling
+path for retrying page writes.
+---
+ fs/f2fs/checkpoint.c | 9 +--------
+ 1 file changed, 1 insertion(+), 8 deletions(-)
+
+diff --git a/fs/f2fs/checkpoint.c b/fs/f2fs/checkpoint.c
+index ad1a319112c9..08c1e6e7bdd7 100644
+--- a/fs/f2fs/checkpoint.c
++++ b/fs/f2fs/checkpoint.c
+@@ -346,15 +346,8 @@ static int __f2fs_write_meta_page(struct page *page,
+ 
+ 	trace_f2fs_writepage(page, META);
+ 
+-	if (unlikely(f2fs_cp_error(sbi))) {
+-		if (is_sbi_flag_set(sbi, SBI_IS_CLOSE)) {
+-			ClearPageUptodate(page);
+-			dec_page_count(sbi, F2FS_DIRTY_META);
+-			unlock_page(page);
+-			return 0;
+-		}
++	if (unlikely(f2fs_cp_error(sbi)))
+ 		goto redirty_out;
+-	}
+ 	if (unlikely(is_sbi_flag_set(sbi, SBI_POR_DOING)))
+ 		goto redirty_out;
+ 	if (wbc->for_reclaim && page->index < GET_SUM_BLOCK(sbi, 0))

@@ -1,0 +1,37 @@
+From 32d659f12e85dc4de9ceba2925074ca2674d8ef4 Mon Sep 17 00:00:00 2001
+From: Cloud_Yun <1770669041@qq.com>
+Date: Wed, 3 Sep 2025 14:39:41 +0000
+Subject: [PATCH] sched: Use atomic_long_fetch_or_acquire() in
+ set_nr_and_not_polling()
+
+Replace the fetch_or() operation with atomic_long_fetch_or_acquire()
+when setting TIF_NEED_RESCHED. This change:
+
+1. Uses the proper atomic API for long types (atomic_long_*)
+2. Adds explicit acquire memory ordering semantics
+3. Maintains the same logic for checking TIF_POLLING_NRFLAG
+
+The acquire ordering ensures proper memory barrier semantics when
+modifying the thread flags, which is important for synchronization
+with flag readers. The function's return behavior remains identical.
+---
+ kernel/sched/core.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 74b32beea1d6..e39deeaa2f9e 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -905,7 +905,11 @@ static inline void hrtick_rq_init(struct rq *rq)
+ static inline bool set_nr_and_not_polling(struct task_struct *p)
+ {
+ 	struct thread_info *ti = task_thread_info(p);
+-	return !(fetch_or(&ti->flags, _TIF_NEED_RESCHED) & _TIF_POLLING_NRFLAG);
++	unsigned long flags;
++
++	flags = atomic_long_fetch_or_acquire(_TIF_NEED_RESCHED, &ti->flags);
++
++	return !(flags & _TIF_POLLING_NRFLAG);
+ }
+ 
+ /*

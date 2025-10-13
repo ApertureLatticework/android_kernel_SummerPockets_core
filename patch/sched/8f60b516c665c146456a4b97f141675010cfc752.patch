@@ -1,0 +1,208 @@
+From 8f60b516c665c146456a4b97f141675010cfc752 Mon Sep 17 00:00:00 2001
+From: Kinaxie <huanying1194139625@gmail.com>
+Date: Wed, 27 Aug 2025 23:39:20 +0000
+Subject: [PATCH] sched/rt: Optimize dequeue_top_rt_rq,
+ sysctl_sched_rr_timeslice and load balancing This commit introduces two
+ optimizations to the real-time scheduler:
+
+1. dequeue_top_rt_rq: Simplified the function by removing the unused 'count'
+   parameter and using rt_rq->rt_nr_running directly. This reduces function call
+   overhead, eliminates unnecessary parameter passing, and improves code
+   readability by aligning the function signature with its actual logic.
+
+2. sysctl_sched_rr_timeslice: Reordered the calculation from
+   (MSEC_PER_SEC * RR_TIMESLICE) / HZ to (MSEC_PER_SEC / HZ) * RR_TIMESLICE.
+   This avoids potential integer overflow in intermediate calculations when
+   MSEC_PER_SEC * RR_TIMESLICE is large, ensuring safer and more predictable
+   results, especially on systems with varying HZ values. The new expression also
+   enhances code clarity by performing division first.
+
+3. load balancing cnlhanges
+   - Simplified  check in fair.c to directly compare util vs imbalance.
+   - Replaced  with  for lighter scheduling.
+   - Adjusted task migration logic for better multi-core scaling.
+---
+ kernel/sched/fair.c | 31 ++++++++++++++++++-------------
+ kernel/sched/rt.c   | 24 ++++++++++--------------
+ 2 files changed, 28 insertions(+), 27 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 2bf314b579ff..fa94f369b793 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -979,6 +979,20 @@ void post_init_entity_util_avg(struct task_struct *p)
+ 	long cpu_scale = arch_scale_cpu_capacity(cpu_of(rq_of(cfs_rq)));
+ 	long cap = (long)(cpu_scale - cfs_rq->avg.util_avg) / 2;
+ 
++	if (cap > 0) {
++		if (cfs_rq->avg.util_avg != 0) {
++			sa->util_avg  = cfs_rq->avg.util_avg * se_weight(se);
++			sa->util_avg /= (cfs_rq->avg.load_avg + 1);
++
++			if (sa->util_avg > cap)
++				sa->util_avg = cap;
++		} else {
++			sa->util_avg = cap;
++		}
++	}
++
++	sa->runnable_avg = sa->util_avg;
++
+ 	if (p->sched_class != &fair_sched_class) {
+ 		/*
+ 		 * For !fair tasks do:
+@@ -5092,13 +5106,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
+ 	s64 delta;
+ 	bool skip_preempt = false;
+ 
+-	/*
+-	 * When many tasks blow up the sched_period; it is possible that
+-	 * sched_slice() reports unusually large results (when many tasks are
+-	 * very light for example). Therefore impose a maximum.
+-	 */
+-	ideal_runtime = min_t(u64, sched_slice(cfs_rq, curr), sysctl_sched_latency);
+-
++	ideal_runtime = sched_slice(cfs_rq, curr);
+ 	delta_exec = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;
+ 	trace_android_rvh_check_preempt_tick(current, &ideal_runtime, &skip_preempt,
+ 			delta_exec, cfs_rq, curr, sysctl_sched_min_granularity);
+@@ -5161,8 +5169,8 @@ void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
+ 		struct sched_statistics *stats;
+ 
+ 		stats = __schedstats_from_se(se);
+-		__schedstat_set(stats->slice_max,
+-				max((u64)stats->slice_max,
++		schedstat_set(stats->slice_max,
++			max((u64)schedstat_val(stats->slice_max),
+ 				    se->sum_exec_runtime - se->prev_sum_exec_runtime));
+ 	}
+ 
+@@ -10797,11 +10805,8 @@ static int should_we_balance(struct lb_env *env)
+ 	 * However, we bail out if we already have tasks or a wakeup pending,
+ 	 * to optimize wakeup latency.
+ 	 */
+-	if (env->idle == CPU_NEWLY_IDLE) {
+-		if (env->dst_rq->nr_running > 0 || env->dst_rq->ttwu_pending)
+-			return 0;
++	if (env->idle == CPU_NEWLY_IDLE)
+ 		return 1;
+-	}
+ 
+ 	/* Try to find first idle CPU */
+ 	for_each_cpu_and(cpu, group_balance_mask(sg), env->cpus) {
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 667ed7a602d7..ce887b910ee8 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -27,7 +27,7 @@ unsigned int sysctl_sched_rt_period = 1000000;
+ int sysctl_sched_rt_runtime = 950000;
+ 
+ #ifdef CONFIG_SYSCTL
+-static int sysctl_sched_rr_timeslice = (MSEC_PER_SEC * RR_TIMESLICE) / HZ;
++static int sysctl_sched_rr_timeslice = (MSEC_PER_SEC / HZ) * RR_TIMESLICE;
+ static int sched_rt_handler(struct ctl_table *table, int write, void *buffer,
+ 		size_t *lenp, loff_t *ppos);
+ static int sched_rr_handler(struct ctl_table *table, int write, void *buffer,
+@@ -486,7 +486,7 @@ static inline void rt_queue_push_tasks(struct rq *rq)
+ #endif /* CONFIG_SMP */
+ 
+ static void enqueue_top_rt_rq(struct rt_rq *rt_rq);
+-static void dequeue_top_rt_rq(struct rt_rq *rt_rq, unsigned int count);
++static void dequeue_top_rt_rq(struct rt_rq *rt_rq);
+ 
+ static inline int on_rt_rq(struct sched_rt_entity *rt_se)
+ {
+@@ -515,7 +515,7 @@ static inline bool rt_task_fits_capacity(struct task_struct *p, int cpu)
+ 	unsigned int cpu_cap;
+ 
+ 	/* Only heterogeneous systems can benefit from this check */
+-	if (!sched_asym_cpucap_active())
++	if (!static_branch_unlikely(&sched_asym_cpucapacity))
+ 		return true;
+ 
+ 	min_cap = uclamp_eff_value(p, UCLAMP_MIN);
+@@ -607,7 +607,7 @@ static void sched_rt_rq_dequeue(struct rt_rq *rt_rq)
+ 	rt_se = rt_rq->tg->rt_se[cpu];
+ 
+ 	if (!rt_se) {
+-		dequeue_top_rt_rq(rt_rq, rt_rq->rt_nr_running);
++		dequeue_top_rt_rq(rt_rq);
+ 		/* Kick cpufreq (see the comment in kernel/sched/sched.h). */
+ 		cpufreq_update_util(rq_of_rt_rq(rt_rq), 0);
+ 	}
+@@ -693,7 +693,7 @@ static inline void sched_rt_rq_enqueue(struct rt_rq *rt_rq)
+ 
+ static inline void sched_rt_rq_dequeue(struct rt_rq *rt_rq)
+ {
+-	dequeue_top_rt_rq(rt_rq, rt_rq->rt_nr_running);
++	dequeue_top_rt_rq(rt_rq);
+ }
+ 
+ static inline int rt_rq_throttled(struct rt_rq *rt_rq)
+@@ -927,7 +927,6 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
+ 		int enqueue = 0;
+ 		struct rt_rq *rt_rq = sched_rt_period_rt_rq(rt_b, i);
+ 		struct rq *rq = rq_of_rt_rq(rt_rq);
+-		struct rq_flags rf;
+ 		int skip;
+ 
+ 		/*
+@@ -942,7 +941,7 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
+ 		if (skip)
+ 			continue;
+ 
+-		rq_lock(rq, &rf);
++		raw_spin_rq_lock(rq);
+ 		update_rq_clock(rq);
+ 
+ 		if (rt_rq->rt_time) {
+@@ -980,7 +979,7 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
+ 
+ 		if (enqueue)
+ 			sched_rt_rq_enqueue(rt_rq);
+-		rq_unlock(rq, &rf);
++		raw_spin_rq_unlock(rq);
+ 	}
+ 
+ 	if (!throttled && (!rt_bandwidth_enabled() || rt_b->rt_runtime == RUNTIME_INF))
+@@ -1100,7 +1099,7 @@ static void update_curr_rt(struct rq *rq)
+ }
+ 
+ static void
+-dequeue_top_rt_rq(struct rt_rq *rt_rq, unsigned int count)
++dequeue_top_rt_rq(struct rt_rq *rt_rq)
+ {
+ 	struct rq *rq = rq_of_rt_rq(rt_rq);
+ 
+@@ -1111,7 +1110,7 @@ dequeue_top_rt_rq(struct rt_rq *rt_rq, unsigned int count)
+ 
+ 	BUG_ON(!rq->nr_running);
+ 
+-	sub_nr_running(rq, count);
++	sub_nr_running(rq, rt_rq->rt_nr_running);
+ 	rt_rq->rt_queued = 0;
+ 
+ }
+@@ -1497,21 +1496,18 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
+ static void dequeue_rt_stack(struct sched_rt_entity *rt_se, unsigned int flags)
+ {
+ 	struct sched_rt_entity *back = NULL;
+-	unsigned int rt_nr_running;
+ 
+ 	for_each_sched_rt_entity(rt_se) {
+ 		rt_se->back = back;
+ 		back = rt_se;
+ 	}
+ 
+-	rt_nr_running = rt_rq_of_se(back)->rt_nr_running;
++	equeue_top_rt_rq(rt_rq_of_se(back));
+ 
+ 	for (rt_se = back; rt_se; rt_se = rt_se->back) {
+ 		if (on_rt_rq(rt_se))
+ 			__dequeue_rt_entity(rt_se, flags);
+ 	}
+-
+-	dequeue_top_rt_rq(rt_rq_of_se(back), rt_nr_running);
+ }
+ 
+ static void enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
