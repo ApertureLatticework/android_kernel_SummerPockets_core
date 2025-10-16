@@ -44,6 +44,7 @@ jobs:
         cd ${{ inputs.module_path }}
 
         ls -al
+        test -f ci.mk && mv ci.mk Makefile
 
         make KDIR=$KERNEL_SRC
         

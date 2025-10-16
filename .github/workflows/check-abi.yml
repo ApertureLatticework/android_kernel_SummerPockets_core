@@ -6,7 +6,7 @@ on:
 jobs:
   build-modules:
     name: Build Shami.ko
-    uses: ./.github/workflows/ddk-lkm.yml
+    uses: ./.github/workflows/build.yml
     strategy:
       fail-fast: false
       matrix:
