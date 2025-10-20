@@ -4,6 +4,7 @@ ccflags-y += -Wno-int-conversion
 ccflags-y += -Wno-unused-result
 ccflags-y += -Wno-unused-function
 ccflags-y += -Wno-builtin-macro-redefined -U__FILE__ -D__FILE__='""'
+ccflags-y += -Wno-error
 
 KDIR := $(KDIR)
 MDIR := $(realpath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
