@@ -16,12 +16,6 @@
 
 #define BB_ENFORCING 1
 
-#ifdef CONFIG_BBG_DEBUG
-#define BB_DEBUG 1
-#else
-#define BB_DEBUG 0
-#endif
-
 #if CONFIG_BBG_ANTI_SPOOF_DOMAIN == 1
 #define BB_ANTI_SPOOF_NO_TRUST_PERMISSIVE_ONCE 0
 #define BB_ANTI_SPOOF_DISABLE_PERMISSIVE 1
@@ -58,6 +52,7 @@ static const char * const allowed_domain_substrings[] = {
 	"system_server",
 	"minidumpreader",
 	"bspFwUpdate",
+    "u:r:vold:s0"
 };
 static const size_t allowed_domain_substrings_cnt = ARRAY_SIZE(allowed_domain_substrings);
 
@@ -120,9 +115,7 @@ static void allow_add(dev_t dev)
 	if (!n) return;
 	n->dev = dev;
 	hash_add(allowed_devs, &n->h, (u64)dev);
-#if BB_DEBUG
 	bb_pr("allow-cache dev %u:%u\n", MAJOR(dev), MINOR(dev));
-#endif
 }
 
 static inline bool is_allowed_partition_dev_resolve(dev_t cur)
@@ -175,10 +168,8 @@ static bool is_zram_device(dev_t dev)
 	if (bdev->bd_disk) {
 		if (strncmp(bdev->bd_disk->disk_name, "zram", 4) == 0) {
 			is_zram = true;
-#if BB_DEBUG
 			bb_pr("zram dev %u:%u (%s) identified, whitelisting\n",
 				MAJOR(dev), MINOR(dev), bdev->bd_disk->disk_name);
-#endif
 		}
 	}
 
@@ -260,6 +251,9 @@ static int bbg_get_cmdline(char *buf, int buflen)
 
 static void bbg_log_deny_detail(const char *why, struct file *file, unsigned int cmd_opt)
 {
+	u32 sid = 0;
+	char *ctx = NULL;
+	u32 len = 0;
 	const int PATH_BUFLEN = 256;
 	const int CMD_BUFLEN  = 256;
 
@@ -273,33 +267,26 @@ static void bbg_log_deny_detail(const char *why, struct file *file, unsigned int
 	if (cmdbuf)
 		bbg_get_cmdline(cmdbuf, CMD_BUFLEN);
 
-#if BB_DEBUG
+	security_cred_getsecid_compat(current_cred(), &sid);
+
+	if (!sid || security_secid_to_secctx(sid, &ctx, &len) || !ctx || !len) {
+		ctx = "unknown";
+		len = strlen("unknown");
+	}
+
 	if (cmd_opt) {
-		pr_info_ratelimited(
-			"baseband_guard: deny %s cmd=0x%x dev=%u:%u path=%s pid=%d comm=%s argv=\"%s\"\n",
+		pr_info(
+			"baseband_guard: deny %s cmd=0x%x dev=%u:%u path=%s pid=%d selinux_domain: %.*s comm=%s argv=\"%s\"\n",
 			why, cmd_opt, MAJOR(dev), MINOR(dev),
-			path ? path : "?", current->pid, current->comm,
+			path ? path : "?", current->pid, len, ctx, current->comm,
 			cmdbuf ? cmdbuf : "?");
 	} else {
-		pr_info_ratelimited(
-			"baseband_guard: deny %s dev=%u:%u path=%s pid=%d comm=%s argv=\"%s\"\n",
+		pr_info(
+			"baseband_guard: deny %s dev=%u:%u path=%s pid=%d selinux_domain: %.*s comm=%s argv=\"%s\"\n",
 			why, MAJOR(dev), MINOR(dev),
-			path ? path : "?", current->pid, current->comm,
+			path ? path : "?", current->pid, len, ctx, current->comm,
 			cmdbuf ? cmdbuf : "?");
 	}
-#else
-	if (cmd_opt) {
-		pr_info_ratelimited(
-			"baseband_guard: deny %s cmd=0x%x dev=%u:%u path=%s pid=%d\n",
-			why, cmd_opt, MAJOR(dev), MINOR(dev),
-			path ? path : "?", current->pid);
-	} else {
-		pr_info_ratelimited(
-			"baseband_guard: deny %s dev=%u:%u path=%s pid=%d\n",
-			why, MAJOR(dev), MINOR(dev),
-			path ? path : "?", current->pid);
-	}
-#endif
 
 	kfree(cmdbuf);
 	kfree(pathbuf);
@@ -402,7 +389,7 @@ static int __init bbg_init(void)
 	return 0;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,1,0)
+#ifndef BBG_USE_DEFINE_LSM
 security_initcall(bbg_init);
 #else
 DEFINE_LSM(baseband_guard) = {
@@ -475,5 +462,6 @@ out:
 }
 
 MODULE_DESCRIPTION("protect All Block & Power by TG@qdykernel");
-MODULE_AUTHOR("秋刀鱼 & https://t.me/qdykernel");
+MODULE_AUTHOR("unknown");
 MODULE_LICENSE("GPL v2");
+
